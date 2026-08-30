@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>World</key>
+    <dict>
+        <key>mini</key><string>REPLACE_WITH_AUTH_ENDPOINT</string>
+        <key>signIn</key><string>REPLACE_WITH_SIGN_IN_ENDPOINT</string>
+        <key>base</key><string>REPLACE_WITH_API_BASE</string>
+        <key>apiKey</key><string>REPLACE_WITH_AUTHORIZED_API_KEY</string>
+        <key>appID</key><string>REPLACE_WITH_AUTHORIZED_APP_ID</string>
+        <key>appSecret</key><string>REPLACE_WITH_AUTHORIZED_APP_SECRET</string>
+        <key>androidPackage</key><string>REPLACE_WITH_AUTHORIZED_CLIENT_PACKAGE</string>
+        <key>androidCertificate</key><string>REPLACE_WITH_AUTHORIZED_CLIENT_CERTIFICATE</string>
+    </dict>
+    <key>Europe</key>
+    <dict>
+        <key>mini</key><string>REPLACE_WITH_AUTH_ENDPOINT</string>
+        <key>signIn</key><string>REPLACE_WITH_SIGN_IN_ENDPOINT</string>
+        <key>base</key><string>REPLACE_WITH_API_BASE</string>
+        <key>apiKey</key><string>REPLACE_WITH_AUTHORIZED_API_KEY</string>
+        <key>appID</key><string>REPLACE_WITH_AUTHORIZED_APP_ID</string>
+        <key>appSecret</key><string>REPLACE_WITH_AUTHORIZED_APP_SECRET</string>
+        <key>androidPackage</key><string>REPLACE_WITH_AUTHORIZED_CLIENT_PACKAGE</string>
+        <key>androidCertificate</key><string>REPLACE_WITH_AUTHORIZED_CLIENT_CERTIFICATE</string>
+    </dict>
+</dict>
+</plist>

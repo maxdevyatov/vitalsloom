@@ -1,0 +1,15 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+dist/
+Configuration/ServiceConfiguration.plist
+.env
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.p12
+*.mobileprovision
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
