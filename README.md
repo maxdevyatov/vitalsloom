@@ -6,6 +6,14 @@ VitalsLoom is not affiliated with, sponsored by, or endorsed by Owlet Baby Care,
 
 ![VitalsLoom live monitoring dashboard](docs/images/vitalsloom-live-dashboard.png)
 
+## Download and install
+
+The [GitHub Releases](https://github.com/maxdevyatov/vitalsloom/releases) page provides an **unsigned, unnotarized preview DMG** for macOS 14 or newer on Apple Silicon and Intel Macs. Verify the DMG against its accompanying `.sha256` file, open it, and drag VitalsLoom to Applications.
+
+Because this preview does not have an Apple Developer ID, macOS blocks its first launch. After trying to open VitalsLoom once, open **System Settings → Privacy & Security**, scroll to **Security**, click **Open Anyway** for VitalsLoom, authenticate, and click **Open**. This creates an exception for VitalsLoom only; do not disable Gatekeeper. If macOS says the app will damage your computer or that it is corrupted, do not override the warning.
+
+The downloadable app starts in demo mode and contains no third-party service credentials or secrets. Live device access requires a separate service configuration that you are legally authorized to use.
+
 ## Run
 
 Requires macOS 14 or newer and Swift 6.2/Xcode 26 or newer.
@@ -36,13 +44,13 @@ With full Xcode 26 selected (the standalone Command Line Tools installation does
 swift test
 ```
 
-## Package as a macOS app
+## Package as a macOS app and DMG
 
 ```sh
 ./scripts/package-macos-app.sh
 ```
 
-The optimized, host-architecture, ad-hoc-signed bundle—with its generated monitor icon—is written to `dist/VitalsLoom.app`. It is intended only for local installation on the Mac that built it. A public binary release must instead be built for all supported architectures, signed with an Apple Developer ID using the hardened runtime, notarized, and stapled. Do not distribute an ad-hoc-signed bundle as a trusted release.
+The script builds an optimized universal app for Apple Silicon and Intel, applies an ad-hoc hardened-runtime signature, and writes the app, unsigned DMG, and SHA-256 checksum to `dist/`. A trusted public release still requires an Apple Developer ID signature and Apple notarization. Never describe the unsigned artifact as notarized or Gatekeeper-approved.
 
 The app starts with simulated data. Open **Main Setup**, disable demo mode, select the region for your compatible device account, and enter credentials. Credentials are stored in Keychain; readings stay in the app's local SQLite database. Existing settings and history from the previous bundle are imported transactionally. The legacy database is deliberately retained as a recovery copy and can be removed manually after the imported history has been verified. macOS may request permission to access the legacy Keychain item, and credentials can be entered again if access is unavailable.
 

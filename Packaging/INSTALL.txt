@@ -1,0 +1,33 @@
+VitalsLoom — unsigned preview
+=============================
+
+System requirements
+-------------------
+macOS 14 or newer on Apple Silicon or Intel.
+
+Install
+-------
+1. Drag VitalsLoom.app to the Applications shortcut in this window.
+2. Open VitalsLoom from Applications once. macOS will block the first launch
+   because this preview is not signed with an Apple Developer ID or notarized.
+3. Open System Settings > Privacy & Security.
+4. Scroll to Security and click Open Anyway for VitalsLoom.
+5. Authenticate and click Open in the confirmation dialog.
+
+This creates an exception for VitalsLoom only. Do not disable Gatekeeper.
+If macOS says the app will damage your computer or that the download is
+corrupted, do not override the warning; delete it and report the problem.
+
+The app starts with simulated data. Live device access requires a separate
+authorized service configuration. No third-party credentials or secrets are
+included in this disk image.
+
+Safety
+------
+VitalsLoom is independent, unofficial software. It is not affiliated with,
+sponsored by, or endorsed by Owlet Baby Care, Inc. It is not a medical device
+and must not be relied upon for diagnosis, treatment, supervision, emergency
+decisions, or safety-critical monitoring. Readings and alarms can be delayed,
+inaccurate, unavailable, or fail.
+
+License and notices are included inside VitalsLoom.app.

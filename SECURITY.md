@@ -17,9 +17,11 @@ the client rejects broader permissions and only permits the known HTTPS hosts
 for the selected service region. Never replace those checks with arbitrary
 user-configured bearer-token destinations.
 
-Locally packaged builds are ad-hoc signed. Public binary releases require an
-Apple Developer ID, hardened runtime, universal architecture support, and
-Apple notarization/stapling before distribution.
+Preview builds may be distributed with an ad-hoc signature only when they are
+clearly labeled as unsigned and unnotarized and accompanied by a published
+SHA-256 checksum. A trusted public release requires an Apple Developer ID,
+hardened runtime, universal architecture support, and Apple
+notarization/stapling.
 
 ## Scope and limitations
 
