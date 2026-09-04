@@ -1,9 +1,12 @@
+import Charts
 import SwiftUI
 
 struct AnalysisView: View {
     @Environment(MonitorViewModel.self) private var monitor
     @State private var period: AnalysisPeriod = .twelveHours
     @State private var snapshot: AnalysisSnapshot?
+    @State private var oxygenTrend: [OxygenTrendPoint] = []
+    @State private var trendScrollPosition = Date.now
     @State private var lastUpdated: Date?
     @State private var customStart = Date.now.addingTimeInterval(-43_200)
     @State private var customEnd = Date.now
@@ -59,11 +62,16 @@ struct AnalysisView: View {
 
             if let snapshot, snapshot.sampleCount > 0 {
                 ScrollView {
+                    oxygenTrendChart
+                        .padding(.horizontal, 16).padding(.top, 16)
+
                     Grid(horizontalSpacing: 14, verticalSpacing: 14) {
                         GridRow {
                             AnalysisCard(title: "OXYGEN SATURATION", systemImage: "lungs.fill", color: .cyan) {
                                 AnalysisMetric(label: "Time below 90%", value: duration(snapshot.timeBelow90), detail: percent(snapshot.below90Fraction))
+                                AnalysisMetric(label: "Longest continuous below 90%", value: duration(snapshot.longestBelow90Duration))
                                 AnalysisMetric(label: "Time below 88%", value: duration(snapshot.timeBelow88), detail: percent(snapshot.below88Fraction), emphasis: snapshot.timeBelow88 > 0 ? .red : .primary)
+                                AnalysisMetric(label: "Longest continuous below 88%", value: duration(snapshot.longestBelow88Duration), emphasis: snapshot.longestBelow88Duration > 0 ? .red : .primary)
                                 Divider()
                                 AnalysisMetric(label: "Average", value: vital(snapshot.averageOxygen, unit: "%"))
                                 AnalysisMetric(label: "Minimum / maximum", value: range(snapshot.minimumOxygen, snapshot.maximumOxygen, unit: "%"))
@@ -100,7 +108,7 @@ struct AnalysisView: View {
 
                     HStack {
                         Image(systemName: "info.circle")
-                        Text("Durations use recorded sample intervals. Long gaps are capped so time when the app was not monitoring is not counted as valid exposure.")
+                        Text("Durations use intervals between contiguous recorded samples. Long gaps are excluded so time when the app was not monitoring is not counted as valid exposure.")
                         Spacer()
                         if let lastUpdated { Text("Updated \(lastUpdated.formatted(date: .omitted, time: .standard))") }
                     }
@@ -135,9 +143,104 @@ struct AnalysisView: View {
             end = now
         }
         let result = await monitor.analysis(since: start, until: end)
+        let trend = await monitor.analysisOxygenTrend(since: start, until: end)
         guard generation == reloadGeneration, !Task.isCancelled else { return }
         snapshot = result
+        oxygenTrend = trend
+        trendScrollPosition = end
         lastUpdated = now
+    }
+
+    private var oxygenTrendChart: some View {
+        let values = oxygenTrend.map(\.oxygenSaturation).filter(\.isFinite)
+        let minimum = values.min() ?? 88
+        let maximum = values.max() ?? 90
+        let lower = max(0, floor(min(minimum, 88) - 1))
+        let upper = min(100, ceil(max(maximum, 90) + 1))
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("SpO₂ TREND").font(.system(size: 13, weight: .bold)).foregroundStyle(.cyan)
+                Spacer()
+                Text("\(trendResolutionLabel) • thresholds 90% and 88%").font(.caption).foregroundStyle(.secondary)
+            }
+            Chart {
+                ForEach(oxygenTrend) { point in
+                    LineMark(
+                        x: .value("Time", point.timestamp),
+                        y: .value("SpO₂", point.oxygenSaturation),
+                        series: .value("Continuous segment", point.segment))
+                        .foregroundStyle(.cyan)
+                        .lineStyle(.init(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                }
+                if oxygenTrend.count == 1, let point = oxygenTrend.first {
+                    PointMark(x: .value("Time", point.timestamp), y: .value("SpO₂", point.oxygenSaturation))
+                        .foregroundStyle(.cyan).symbolSize(42)
+                }
+                RuleMark(y: .value("90% threshold", 90))
+                    .foregroundStyle(.orange.opacity(0.95))
+                    .lineStyle(.init(lineWidth: 1.5, dash: [6, 4]))
+                    .annotation(position: .top, alignment: .trailing) {
+                        Text("90%").font(.caption2.bold()).foregroundStyle(.orange)
+                    }
+                RuleMark(y: .value("88% threshold", 88))
+                    .foregroundStyle(.red.opacity(0.95))
+                    .lineStyle(.init(lineWidth: 1.5, dash: [4, 3]))
+                    .annotation(position: .bottom, alignment: .trailing) {
+                        Text("88%").font(.caption2.bold()).foregroundStyle(.red)
+                    }
+            }
+            .chartYScale(domain: lower...upper)
+            .chartScrollableAxes(.horizontal)
+            .chartXVisibleDomain(length: trendVisibleDuration)
+            .chartScrollPosition(x: $trendScrollPosition)
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 6)) { value in
+                    AxisGridLine().foregroundStyle(.white.opacity(0.10))
+                    AxisTick().foregroundStyle(.white.opacity(0.35))
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(date.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
+                                .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading, values: Array(Set([lower, 88, 90, upper])).sorted()) { value in
+                    AxisGridLine().foregroundStyle(.white.opacity(0.14))
+                    AxisTick().foregroundStyle(.cyan.opacity(0.65))
+                    AxisValueLabel {
+                        if let number = value.as(Double.self) {
+                            Text("\(integer(number))%")
+                                .font(.system(size: 10, design: .monospaced)).foregroundStyle(.cyan)
+                        }
+                    }
+                }
+            }
+            .chartPlotStyle { $0.background(Color.black.opacity(0.2)) }
+            .frame(height: 230)
+            .overlay {
+                if oxygenTrend.isEmpty {
+                    Label("No usable SpO₂ values in this period", systemImage: "waveform.slash")
+                        .font(.callout.weight(.semibold)).foregroundStyle(.orange)
+                        .padding(10).background(.black.opacity(0.8), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.white.opacity(0.08)))
+    }
+
+    private var trendVisibleDuration: TimeInterval {
+        guard let snapshot else { return 3_600 }
+        return min(3_600, max(60, snapshot.periodEnd.timeIntervalSince(snapshot.periodStart)))
+    }
+
+    private var trendResolutionLabel: String {
+        guard let snapshot else { return "5-second resolution" }
+        return snapshot.periodEnd.timeIntervalSince(snapshot.periodStart) <= 86_400
+            ? "5-second resolution" : "1-minute resolution"
     }
 
     private func duration(_ seconds: TimeInterval) -> String {

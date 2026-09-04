@@ -7,6 +7,8 @@ struct SettingsView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var refreshInterval = 5.0
+    @State private var audibleConnectionLossAlarm = true
+    @State private var movementThreshold = 50.0
     @State private var alarmRules: [AlarmRule] = []
     @State private var didLoad = false
     @State private var confirmCredentialRemoval = false
@@ -59,6 +61,16 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            Section("Data Quality & Connection") {
+                Toggle("Sound alarm when the connection is lost", isOn: $audibleConnectionLossAlarm)
+                LabeledContent("Mark readings unreliable when movement is above") {
+                    TextField("Movement", value: $movementThreshold, format: .number.precision(.fractionLength(0...1)))
+                        .frame(width: 75)
+                }
+                Text("The default movement threshold is 50. A reading above it marks 15 seconds before and 30 seconds after as movement-affected. Values remain visible with a yellow chart background, but the interval is excluded from alarms and Analysis calculations.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section {
                 ForEach($alarmRules) { $rule in
                     AlarmRuleEditor(rule: $rule) {
@@ -83,6 +95,8 @@ struct SettingsView: View {
                     monitor.email = email
                     monitor.password = password
                     monitor.refreshInterval = refreshInterval
+                    monitor.audibleConnectionLossAlarm = audibleConnectionLossAlarm
+                    monitor.movementThreshold = movementThreshold
                     monitor.alarmRules = alarmRules
                     monitor.saveSettings()
                 }
@@ -99,6 +113,8 @@ struct SettingsView: View {
             email = monitor.email
             password = monitor.password
             refreshInterval = monitor.refreshInterval
+            audibleConnectionLossAlarm = monitor.audibleConnectionLossAlarm
+            movementThreshold = monitor.movementThreshold
             alarmRules = monitor.alarmRules
             didLoad = true
         }

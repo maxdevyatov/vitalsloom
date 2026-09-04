@@ -6,14 +6,16 @@ struct VitalReading: Identifiable, Sendable {
     let heartRate: Double
     let deviceSerial: String
     let status: ReadingStatus
+    let movement: Int?
 
-    init(id: Int64 = 0, timestamp: Date = .now, oxygenSaturation: Double, heartRate: Double, deviceSerial: String, status: ReadingStatus = .available) {
+    init(id: Int64 = 0, timestamp: Date = .now, oxygenSaturation: Double, heartRate: Double, deviceSerial: String, status: ReadingStatus = .available, movement: Int? = nil) {
         self.id = id
         self.timestamp = timestamp
         self.oxygenSaturation = oxygenSaturation
         self.heartRate = heartRate
         self.deviceSerial = deviceSerial
         self.status = status
+        self.movement = movement
     }
 }
 
@@ -25,6 +27,7 @@ struct LiveVitals: Sendable {
     var timestamp: Date
     var serial: String
     var movement: Int?
+    var reportsMovementAsBoolean = false
 }
 
 enum ReadingStatus: String, Codable, Sendable {
@@ -36,10 +39,14 @@ enum ReadingStatus: String, Codable, Sendable {
     var label: String {
         switch self {
         case .available: "Available"
-        case .movement: "Movement"
+        case .movement: "Unreliable movement"
         case .stale: "Stale"
         case .unavailable: "Unavailable"
         }
+    }
+
+    var hasUsableVitals: Bool {
+        self == .available || self == .movement
     }
 }
 
@@ -111,7 +118,17 @@ struct AggregatedReading: Identifiable, Sendable {
     let averageHeartRate: Double
     let minimumHeartRate: Double
     let maximumHeartRate: Double
+    let averageMovement: Double?
+    let below90Duration: TimeInterval
+    let longestBelow90Duration: TimeInterval
     let sampleCount: Int
+}
+
+struct OxygenTrendPoint: Identifiable, Sendable {
+    var id: Date { timestamp }
+    let timestamp: Date
+    let oxygenSaturation: Double
+    let segment: Int
 }
 
 struct AnalysisSnapshot: Sendable {
@@ -124,6 +141,8 @@ struct AnalysisSnapshot: Sendable {
     let staleUnavailableDuration: TimeInterval
     let timeBelow90: TimeInterval
     let timeBelow88: TimeInterval
+    let longestBelow90Duration: TimeInterval
+    let longestBelow88Duration: TimeInterval
     let averageOxygen: Double?
     let minimumOxygen: Double?
     let maximumOxygen: Double?

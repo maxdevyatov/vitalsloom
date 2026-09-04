@@ -88,8 +88,12 @@ struct MonitorView: View {
 
     private func tracePanel(title: String, unit: String, color: Color, metric: AlarmMetric, keyPath: KeyPath<VitalReading, Double>, fallback: ClosedRange<Double>) -> some View {
         let data = Array(filteredHistory.suffix(90))
+        let qualitySpans = qualitySpans(from: data)
+        let samples = lineSamples(from: data, keyPath: keyPath)
+        let missingStatus = missingChartStatus(data: data, samples: samples)
         let rules = monitor.alarmRules.filter { $0.enabled && $0.metric == metric }
-        let scale = chartScale(data: data, keyPath: keyPath, fallback: fallback, thresholds: rules.map(\.threshold))
+        let visibleRules = rules.filter { $0.threshold.isFinite }
+        let scale = chartScale(data: data, keyPath: keyPath, fallback: fallback, thresholds: visibleRules.map(\.threshold))
         return VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text(title).foregroundStyle(color).font(.system(size: 14, weight: .bold))
@@ -100,24 +104,26 @@ struct MonitorView: View {
             }
             .font(.caption).foregroundStyle(.secondary)
             Chart {
-                ForEach(Array(data.enumerated()), id: \.offset) { index, reading in
-                    if reading.status != .available {
+                ForEach(qualitySpans) { span in
                     RectangleMark(
-                        xStart: .value("Quality start", reading.timestamp),
-                        xEnd: .value("Quality end", qualityEnd(in: data, at: index)),
+                        xStart: .value("Quality start", span.start),
+                        xEnd: .value("Quality end", span.end),
                         yStart: .value("Scale minimum", scale.domain.lowerBound),
                         yEnd: .value("Scale maximum", scale.domain.upperBound))
-                    .foregroundStyle(qualityColor(reading.status).opacity(0.28))
-                    }
+                    .foregroundStyle(qualityColor(span.status).opacity(0.28))
                 }
-                ForEach(lineSamples(from: data, keyPath: keyPath)) { sample in
+                ForEach(samples) { sample in
                     LineMark(
                         x: .value("Time", sample.timestamp),
                         y: .value(title, sample.value),
                         series: .value("Continuous segment", sample.segment))
                         .foregroundStyle(color).lineStyle(.init(lineWidth: 2, lineCap: .round, lineJoin: .round))
                 }
-                ForEach(rules) { rule in
+                if samples.count == 1, let sample = samples.first {
+                    PointMark(x: .value("Time", sample.timestamp), y: .value(title, sample.value))
+                        .foregroundStyle(color).symbolSize(42)
+                }
+                ForEach(visibleRules) { rule in
                     RuleMark(y: .value("\(rule.name) threshold", rule.threshold))
                         .foregroundStyle(.red.opacity(0.85))
                         .lineStyle(.init(lineWidth: 1.5, dash: [6, 4]))
@@ -156,10 +162,13 @@ struct MonitorView: View {
             }
             .chartOverlay { proxy in
                 GeometryReader { geometry in
-                    chartHoverOverlay(chartID: title, data: data, proxy: proxy, geometry: geometry)
+                    ZStack {
+                        chartHoverOverlay(chartID: title, data: data, proxy: proxy, geometry: geometry)
+                        if let missingStatus { missingChartOverlay(status: missingStatus) }
+                    }
                 }
             }
-            .chartPlotStyle { $0.background(Color.black.opacity(0.18)) }
+            .chartPlotStyle { $0.background(chartBackground(for: missingStatus)) }
         }
         .padding(.horizontal, 16).padding(.vertical, 10).frame(maxHeight: .infinity)
     }
@@ -167,10 +176,14 @@ struct MonitorView: View {
     private var historyPanel: some View {
         let data = filteredHistory
         let keyPath: KeyPath<VitalReading, Double> = selectedTrendMetric == .oxygenSaturation ? \.oxygenSaturation : \.heartRate
+        let qualitySpans = qualitySpans(from: data)
+        let samples = lineSamples(from: data, keyPath: keyPath)
+        let missingStatus = missingChartStatus(data: data, samples: samples)
         let color: Color = selectedTrendMetric == .oxygenSaturation ? .cyan : .green
         let fallback: ClosedRange<Double> = selectedTrendMetric == .oxygenSaturation ? 94...100 : 100...140
         let rules = monitor.alarmRules.filter { $0.enabled && $0.metric == selectedTrendMetric }
-        let scale = chartScale(data: data, keyPath: keyPath, fallback: fallback, thresholds: rules.map(\.threshold))
+        let visibleRules = rules.filter { $0.threshold.isFinite }
+        let scale = chartScale(data: data, keyPath: keyPath, fallback: fallback, thresholds: visibleRules.map(\.threshold))
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("TRENDS").font(.system(size: 13, weight: .bold)).foregroundStyle(.secondary)
@@ -178,21 +191,19 @@ struct MonitorView: View {
                 Picker("Metric", selection: $selectedTrendMetric) {
                     Text("SpO₂").tag(AlarmMetric.oxygenSaturation)
                     Text("Pulse").tag(AlarmMetric.heartRate)
-                }.pickerStyle(.segmented).frame(width: 150)
-                Picker("Range", selection: $selectedRange) { ForEach(HistoryRange.allCases) { Text($0.label).tag($0) } }.pickerStyle(.segmented).frame(width: 250)
+                }.labelsHidden().pickerStyle(.segmented).frame(width: 150)
+                Picker("Range", selection: $selectedRange) { ForEach(HistoryRange.allCases) { Text($0.label).tag($0) } }.labelsHidden().pickerStyle(.segmented).frame(width: 250)
             }
             Chart {
-                ForEach(Array(data.enumerated()), id: \.offset) { index, reading in
-                    if reading.status != .available {
+                ForEach(qualitySpans) { span in
                     RectangleMark(
-                        xStart: .value("Quality start", reading.timestamp),
-                        xEnd: .value("Quality end", qualityEnd(in: data, at: index)),
+                        xStart: .value("Quality start", span.start),
+                        xEnd: .value("Quality end", span.end),
                         yStart: .value("Scale minimum", scale.domain.lowerBound),
                         yEnd: .value("Scale maximum", scale.domain.upperBound))
-                    .foregroundStyle(qualityColor(reading.status).opacity(0.28))
-                    }
+                    .foregroundStyle(qualityColor(span.status).opacity(0.28))
                 }
-                ForEach(lineSamples(from: data, keyPath: keyPath)) { sample in
+                ForEach(samples) { sample in
                     LineMark(
                         x: .value("Time", sample.timestamp),
                         y: .value(selectedTrendMetric.rawValue, sample.value),
@@ -200,7 +211,11 @@ struct MonitorView: View {
                         .foregroundStyle(color)
                         .lineStyle(.init(lineWidth: 2, lineCap: .round, lineJoin: .round))
                 }
-                ForEach(rules) { rule in
+                if samples.count == 1, let sample = samples.first {
+                    PointMark(x: .value("Time", sample.timestamp), y: .value(selectedTrendMetric.rawValue, sample.value))
+                        .foregroundStyle(color).symbolSize(42)
+                }
+                ForEach(visibleRules) { rule in
                     RuleMark(y: .value("\(rule.name) threshold", rule.threshold))
                         .foregroundStyle(.red.opacity(0.9))
                         .lineStyle(.init(lineWidth: 1.5, dash: [6, 4]))
@@ -231,9 +246,13 @@ struct MonitorView: View {
             }
             .chartOverlay { proxy in
                 GeometryReader { geometry in
-                    chartHoverOverlay(chartID: "Trends", data: data, proxy: proxy, geometry: geometry)
+                    ZStack {
+                        chartHoverOverlay(chartID: "Trends", data: data, proxy: proxy, geometry: geometry)
+                        if let missingStatus { missingChartOverlay(status: missingStatus) }
+                    }
                 }
             }
+            .chartPlotStyle { $0.background(chartBackground(for: missingStatus)) }
             HStack(spacing: 16) {
                 Label(selectedTrendMetric == .oxygenSaturation ? "SpO₂ %" : "Pulse bpm", systemImage: selectedTrendMetric == .oxygenSaturation ? "waveform.path.ecg" : "heart.fill").foregroundStyle(color)
                 qualityLegend
@@ -246,15 +265,20 @@ struct MonitorView: View {
 
     private var numericColumn: some View {
         VStack(spacing: 0) {
-            VitalTile(label: "Pulse", value: displayedVital(monitor.vitals.heartRate), unit: "bpm", color: .green, limit: monitor.pulseLimitLabel, isAvailable: monitor.readingStatus == .available)
+            VitalTile(label: "Pulse", value: displayedVital(monitor.vitals.heartRate), unit: "bpm", color: .green, limit: monitor.pulseLimitLabel, isAvailable: monitor.readingStatus.hasUsableVitals)
             Divider().overlay(Color.white.opacity(0.15))
-            VitalTile(label: "SpO₂", value: displayedVital(monitor.vitals.oxygenSaturation), unit: "%", color: .cyan, limit: monitor.oxygenLimitLabel, isAvailable: monitor.readingStatus == .available)
+            VitalTile(label: "SpO₂", value: displayedVital(monitor.vitals.oxygenSaturation), unit: "%", color: .cyan, limit: monitor.oxygenLimitLabel, isAvailable: monitor.readingStatus.hasUsableVitals)
             Divider().overlay(Color.white.opacity(0.15))
             VStack(alignment: .leading, spacing: 14) {
                 Text("SOCK").font(.caption.bold()).foregroundStyle(.secondary)
                 if let battery = monitor.vitals.batteryPercentage, let value = safeInteger(battery) { Label("\(value)%", systemImage: battery > 20 ? "battery.75percent" : "battery.25percent").foregroundStyle(battery > 20 ? .white : .orange) }
                 if let signal = monitor.vitals.signalStrength, let value = safeInteger(signal) { Label("\(value) dBm", systemImage: "wifi").foregroundStyle(.white.opacity(0.8)) }
-                if monitor.readingStatus != .available {
+                Label("Movement \(monitor.vitals.movement.map(String.init) ?? "—")", systemImage: "figure.walk.motion")
+                    .foregroundStyle(.white.opacity(0.8))
+                if monitor.readingStatus == .movement {
+                    Label("Movement-affected interval — unreliable", systemImage: "figure.walk.motion")
+                        .foregroundStyle(qualityColor(monitor.readingStatus))
+                } else if !monitor.readingStatus.hasUsableVitals {
                     Label(monitor.readingStatus.label, systemImage: "exclamationmark.circle.fill")
                         .foregroundStyle(qualityColor(monitor.readingStatus))
                 }
@@ -291,11 +315,16 @@ struct MonitorView: View {
         case .critical: .red
         }
     }
-    private func chartScale(data: [VitalReading], keyPath: KeyPath<VitalReading, Double>, fallback: ClosedRange<Double>, thresholds: [Double] = []) -> ChartScale {
+    private func chartScale(data: [VitalReading], keyPath: KeyPath<VitalReading, Double>, fallback: ClosedRange<Double>, thresholds: [Double]) -> ChartScale {
         let isOxygen = keyPath == \.oxygenSaturation
-        let finiteThresholds = thresholds.filter(\.isFinite)
-        let validThresholds = isOxygen ? finiteThresholds.map { min(100, max(0, $0)) } : finiteThresholds
-        let values = data.filter { $0.status == .available && $0[keyPath: keyPath].isFinite }.map { $0[keyPath: keyPath] }
+        let validThresholds = thresholds.compactMap { threshold -> Double? in
+            guard threshold.isFinite else { return nil }
+            return isOxygen ? min(100, max(0, threshold)) : threshold
+        }
+        let values = data.compactMap { reading -> Double? in
+            guard reading.status.hasUsableVitals else { return nil }
+            return chartValue(reading, keyPath: keyPath)
+        }
         guard let minimum = values.min(), let maximum = values.max() else {
             let lower = max(isOxygen ? 0 : -Double.greatestFiniteMagnitude, floor(min(fallback.lowerBound, validThresholds.min() ?? fallback.lowerBound)))
             let upper = min(isOxygen ? 100 : Double.greatestFiniteMagnitude, ceil(max(fallback.upperBound, validThresholds.max() ?? fallback.upperBound)))
@@ -314,7 +343,7 @@ struct MonitorView: View {
 
     private var qualityLegend: some View {
         HStack(spacing: 10) {
-            qualityLegendItem("Movement", status: .movement)
+            qualityLegendItem("Movement-affected interval", status: .movement)
             qualityLegendItem("Stale", status: .stale)
             qualityLegendItem("Unavailable", status: .unavailable)
         }
@@ -333,31 +362,103 @@ struct MonitorView: View {
         }
     }
 
+    private func missingChartStatus(data: [VitalReading], samples: [ChartLineSample]) -> ReadingStatus? {
+        guard samples.isEmpty else { return nil }
+        if let latest = data.last {
+            let status = displayStatus(for: latest)
+            if !status.hasUsableVitals { return status }
+        }
+        if !monitor.readingStatus.hasUsableVitals { return monitor.readingStatus }
+        return .unavailable
+    }
+
+    private func chartBackground(for missingStatus: ReadingStatus?) -> Color {
+        guard let missingStatus else { return Color.black.opacity(0.18) }
+        return qualityColor(missingStatus).opacity(0.24)
+    }
+
+    private func missingChartOverlay(status: ReadingStatus) -> some View {
+        Label(missingChartMessage(status), systemImage: status == .stale ? "clock.badge.exclamationmark" : "waveform.slash")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(qualityColor(status))
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 7))
+            .allowsHitTesting(false)
+    }
+
+    private func missingChartMessage(_ status: ReadingStatus) -> String {
+        switch status {
+        case .stale: "No chart values — no fresh device update"
+        case .unavailable: "No chart values — data unavailable"
+        case .movement: "No chart values — movement above reliability threshold"
+        case .available: "No chart values available"
+        }
+    }
+
     private func lineSamples(from data: [VitalReading], keyPath: KeyPath<VitalReading, Double>) -> [ChartLineSample] {
         var segment = 0
         var previousTimestamp: Date?
         var result: [ChartLineSample] = []
-        for (index, reading) in data.enumerated() {
-            let value = reading[keyPath: keyPath]
-            guard reading.status == .available, value.isFinite else {
+        for reading in data {
+            guard reading.status.hasUsableVitals,
+                  let value = chartValue(reading, keyPath: keyPath) else {
                 previousTimestamp = nil
                 continue
             }
             if previousTimestamp == nil || reading.timestamp.timeIntervalSince(previousTimestamp!) > max(10, monitor.refreshInterval * 2.5) {
                 segment += 1
             }
-            result.append(ChartLineSample(id: index, timestamp: reading.timestamp, value: value, segment: segment))
+            result.append(ChartLineSample(
+                id: ChartMarkID(databaseID: reading.id, timestamp: reading.timestamp),
+                timestamp: reading.timestamp,
+                value: value,
+                segment: segment))
             previousTimestamp = reading.timestamp
         }
         return result
     }
 
-    private func qualityEnd(in data: [VitalReading], at index: Int) -> Date {
-        guard data.indices.contains(index) else { return .now }
-        let start = data[index].timestamp
-        let fallback = start.addingTimeInterval(max(1, monitor.refreshInterval))
-        guard data.indices.contains(index + 1) else { return fallback }
-        return min(data[index + 1].timestamp, start.addingTimeInterval(max(10, monitor.refreshInterval * 2.5)))
+    private func qualitySpans(from data: [VitalReading]) -> [ChartQualitySpan] {
+        guard let first = data.first, let last = data.last else { return [] }
+        let sampleWidth = max(1, monitor.refreshInterval)
+        let displayedEnd = last.timestamp.addingTimeInterval(sampleWidth)
+        var result = MovementReliability.affectedIntervals(in: monitor.history, threshold: monitor.movementThreshold)
+            .enumerated()
+            .compactMap { index, interval -> ChartQualitySpan? in
+                let start = max(first.timestamp, interval.start)
+                let end = min(displayedEnd, interval.end)
+                guard end > start else { return nil }
+                return ChartQualitySpan(
+                    id: ChartMarkID(databaseID: Int64.min + Int64(index), timestamp: start),
+                    start: start,
+                    end: end,
+                    status: .movement)
+            }
+        result.append(contentsOf: data.enumerated().compactMap { index, reading in
+            guard reading.status == .stale || reading.status == .unavailable else { return nil }
+            let maximumEnd = reading.timestamp.addingTimeInterval(max(10, monitor.refreshInterval * 2.5))
+            let fallbackEnd = reading.timestamp.addingTimeInterval(max(1, monitor.refreshInterval))
+            let end = data.indices.contains(index + 1) ? min(data[index + 1].timestamp, maximumEnd) : fallbackEnd
+            return ChartQualitySpan(
+                id: ChartMarkID(databaseID: reading.id, timestamp: reading.timestamp),
+                start: reading.timestamp,
+                end: max(reading.timestamp, end),
+                status: reading.status)
+        })
+        return result
+    }
+
+    private func displayStatus(for reading: VitalReading) -> ReadingStatus {
+        MovementReliability.displayStatus(
+            for: reading,
+            among: monitor.history,
+            threshold: monitor.movementThreshold)
+    }
+
+    private func chartValue(_ reading: VitalReading, keyPath: KeyPath<VitalReading, Double>) -> Double? {
+        let value = reading[keyPath: keyPath]
+        guard value.isFinite else { return nil }
+        return keyPath == \.oxygenSaturation ? min(100, max(0, value)) : value
     }
 
     private func safeInteger(_ value: Double) -> Int? {
@@ -368,7 +469,7 @@ struct MonitorView: View {
     private func displayInteger(_ value: Double) -> String { safeInteger(value).map(String.init) ?? "—" }
 
     private func displayedVital(_ value: Double) -> String {
-        guard monitor.readingStatus == .available else { return "—" }
+        guard monitor.readingStatus.hasUsableVitals else { return "—" }
         return displayInteger(value)
     }
 
@@ -404,14 +505,18 @@ struct MonitorView: View {
     }
 
     private func hoverTooltip(_ reading: VitalReading) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        let status = displayStatus(for: reading)
+        return VStack(alignment: .leading, spacing: 3) {
             Text(reading.timestamp.formatted(date: .omitted, time: .standard)).font(.caption.monospacedDigit())
-            switch reading.status {
+            switch status {
             case .available:
                 Text("SpO₂ \(displayInteger(reading.oxygenSaturation))%  •  Pulse \(displayInteger(reading.heartRate)) bpm")
             case .movement:
-                Label("Movement detected — values may be stale", systemImage: "figure.walk.motion")
-                    .foregroundStyle(.yellow)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("SpO₂ \(displayInteger(reading.oxygenSaturation))%  •  Pulse \(displayInteger(reading.heartRate)) bpm")
+                    Label("Movement-affected interval — unreliable", systemImage: "figure.walk.motion")
+                        .foregroundStyle(.yellow)
+                }
             case .stale:
                 Label("Stale — no fresh device update", systemImage: "clock.badge.exclamationmark")
                     .foregroundStyle(.orange)
@@ -423,7 +528,7 @@ struct MonitorView: View {
         .font(.caption)
         .padding(.horizontal, 9).padding(.vertical, 7)
         .background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(qualityColor(reading.status).opacity(reading.status == .available ? 0.35 : 0.9)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(qualityColor(status).opacity(status == .available ? 0.35 : 0.9)))
     }
 }
 
@@ -433,11 +538,23 @@ private struct ChartHover {
     let location: CGPoint
 }
 
+private struct ChartMarkID: Hashable {
+    let databaseID: Int64
+    let timestamp: Date
+}
+
 private struct ChartLineSample: Identifiable {
-    let id: Int
+    let id: ChartMarkID
     let timestamp: Date
     let value: Double
     let segment: Int
+}
+
+private struct ChartQualitySpan: Identifiable {
+    let id: ChartMarkID
+    let start: Date
+    let end: Date
+    let status: ReadingStatus
 }
 
 private struct ChartScale {
@@ -450,12 +567,21 @@ private struct ChartScale {
 private struct VitalTile: View {
     let label: String; let value: String; let unit: String; let color: Color; let limit: String; let isAvailable: Bool
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack { Text(label).font(.system(size: 17, weight: .bold)); Spacer(); Text(unit).font(.caption).foregroundStyle(.secondary) }.foregroundStyle(color)
-            Spacer(minLength: 4)
-            Text(value).font(.system(size: 96, weight: .medium, design: .rounded)).monospacedDigit().minimumScaleFactor(0.6).foregroundStyle(color.opacity(isAvailable ? 1 : 0.45))
-            HStack { Image(systemName: "bell"); Text(limit) }.font(.caption).foregroundStyle(.secondary)
-        }.padding(18).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        GeometryReader { geometry in
+            let valueFontSize = min(168, max(115.2, min(geometry.size.width * 0.552, geometry.size.height * 0.672)))
+            VStack(alignment: .leading, spacing: 0) {
+                HStack { Text(label).font(.system(size: 17, weight: .bold)); Spacer(); Text(unit).font(.caption).foregroundStyle(.secondary) }.foregroundStyle(color)
+                Spacer(minLength: 2)
+                Text(value)
+                    .font(.system(size: valueFontSize, weight: .medium, design: .rounded))
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                    .foregroundStyle(color.opacity(isAvailable ? 1 : 0.45))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack { Image(systemName: "bell"); Text(limit) }.font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .leading)
+        }
     }
 }
 

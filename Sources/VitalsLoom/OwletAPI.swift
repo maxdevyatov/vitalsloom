@@ -121,6 +121,8 @@ actor OwletAPI {
                 signalStrength: optionalNumber(realtime["rsi"], allowed: -150...0),
                 timestamp: parseDate(properties["REAL_TIME_VITALS"]?["data_updated_at"]) ?? .distantPast,
                 serial: device.serial,
+                // Dream Sock/v3 exposes `mv` as a numeric magnitude. Preserve
+                // it for history without interpreting it as a boolean event.
                 movement: safeInteger(realtime["mv"], allowed: 0...1_000))
         }
 
@@ -136,7 +138,8 @@ actor OwletAPI {
             signalStrength: optionalPropertyNumber("BLE_RSSI", in: properties, allowed: -150...0),
             timestamp: sourceTimestamp,
             serial: device.serial,
-            movement: safeInteger(properties["MOVEMENT"]?["value"], allowed: 0...1_000))
+            movement: safeInteger(properties["MOVEMENT"]?["value"], allowed: 0...1_000),
+            reportsMovementAsBoolean: true)
     }
 
     private func refreshAuthentication() async throws {

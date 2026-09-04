@@ -19,6 +19,8 @@ final class MonitorViewModel {
     var email = ""
     var password = ""
     var refreshInterval = 5.0
+    var audibleConnectionLossAlarm = true
+    var movementThreshold = 50.0
     var observedMinimumRefresh: Double?
     var isTestingRefresh = false
     var refreshTestStatus = ""
@@ -55,6 +57,9 @@ final class MonitorViewModel {
         isDemoMode = UserDefaults.standard.object(forKey: "demoMode") as? Bool ?? true
         let savedRefreshInterval = UserDefaults.standard.object(forKey: "refreshInterval") as? Double ?? 5
         refreshInterval = savedRefreshInterval.isFinite ? min(300, max(1, savedRefreshInterval)) : 5
+        audibleConnectionLossAlarm = UserDefaults.standard.object(forKey: "audibleConnectionLossAlarm") as? Bool ?? true
+        let savedMovementThreshold = UserDefaults.standard.object(forKey: "movementThreshold") as? Double ?? 50
+        movementThreshold = savedMovementThreshold.isFinite ? min(1_000, max(0, savedMovementThreshold)) : 50
         if let data = UserDefaults.standard.data(forKey: "alarmRules"), var saved = try? JSONDecoder().decode([AlarmRule].self, from: data), !saved.isEmpty {
             if !UserDefaults.standard.bool(forKey: "oxygenDefault88Migrated"),
                let index = saved.firstIndex(where: { $0.name == "Low oxygen" && $0.metric == .oxygenSaturation && $0.comparison == .below && $0.threshold == 90 && $0.durationSeconds == 10 }) {
@@ -110,10 +115,14 @@ final class MonitorViewModel {
         }
         if !refreshInterval.isFinite { refreshInterval = 5 }
         refreshInterval = min(300, max(1, refreshInterval))
+        if !movementThreshold.isFinite { movementThreshold = 50 }
+        movementThreshold = min(1_000, max(0, movementThreshold))
         normalizeAlarmRules()
         UserDefaults.standard.set(region.rawValue, forKey: "region")
         UserDefaults.standard.set(isDemoMode, forKey: "demoMode")
         UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval")
+        UserDefaults.standard.set(audibleConnectionLossAlarm, forKey: "audibleConnectionLossAlarm")
+        UserDefaults.standard.set(movementThreshold, forKey: "movementThreshold")
         if let data = try? JSONEncoder().encode(alarmRules) { UserDefaults.standard.set(data, forKey: "alarmRules") }
         showingSettings = false
         reconnect()
@@ -153,8 +162,12 @@ final class MonitorViewModel {
     func aggregatedHistory(since: Date, bucketSeconds: Int) async -> [AggregatedReading] {
         let path = store.databasePath
         let bucket = max(1, bucketSeconds)
+        let sampleSeconds = min(Double(bucket), max(1, refreshInterval))
+        let threshold = movementThreshold
         return await Task.detached(priority: .utility) {
-            HistoryAnalysisReader.aggregate(databasePath: path, since: since, bucketSeconds: bucket)
+            HistoryAnalysisReader.aggregate(
+                databasePath: path, since: since, bucketSeconds: bucket,
+                sampleSeconds: sampleSeconds, movementThreshold: threshold)
         }.value
     }
 
@@ -167,11 +180,27 @@ final class MonitorViewModel {
             .map(\.threshold).min() ?? 220
         let path = store.databasePath
         let sampleGap = max(10, refreshInterval * 2.5)
+        let threshold = movementThreshold
         return await Task.detached(priority: .utility) {
             HistoryAnalysisReader.read(
                 databasePath: path, since: since, until: until,
                 maximumSampleGap: sampleGap,
+                movementThreshold: threshold,
                 lowPulseLimit: lowPulse, highPulseLimit: highPulse)
+        }.value
+    }
+
+    func analysisOxygenTrend(since: Date, until: Date) async -> [OxygenTrendPoint] {
+        let duration = max(0, until.timeIntervalSince(since))
+        let bucketSeconds = duration <= 86_400 ? 5 : 60
+        let limit = min(100_000, max(1, Int(ceil(duration / Double(bucketSeconds))) + 2))
+        let path = store.databasePath
+        let threshold = movementThreshold
+        return await Task.detached(priority: .utility) {
+            HistoryAnalysisReader.oxygenTrend(
+                databasePath: path, since: since, until: until,
+                bucketSeconds: bucketSeconds, movementThreshold: threshold,
+                limit: limit)
         }.value
     }
 
@@ -274,7 +303,8 @@ final class MonitorViewModel {
             oxygenSaturation: 96.8 + sin(demoPhase * 0.43) * 1.1,
             heartRate: 122 + sin(demoPhase) * 7 + sin(demoPhase * 0.27) * 3,
             batteryPercentage: max(5, (vitals.batteryPercentage ?? 82) - 0.01),
-            signalStrength: -54, timestamp: .now, serial: "DEMO", movement: movement)
+            signalStrength: -54, timestamp: .now, serial: "DEMO", movement: movement,
+            reportsMovementAsBoolean: true)
     }
 
     private func accept(_ incoming: LiveVitals) {
@@ -291,12 +321,17 @@ final class MonitorViewModel {
         lastReceivedAt = receivedAt
         lastReceivedInstant = receivedInstant
         readingStatus = quality(of: reading, at: receivedAt, instant: receivedInstant)
-        if readingStatus == .available { evaluateAlarms() } else { markDataUnavailable() }
+        switch readingStatus {
+        case .available: evaluateAlarms()
+        case .movement: markDataUnreliable()
+        case .stale, .unavailable: markDataUnavailable()
+        }
         recordChartSample(status: readingStatus)
     }
 
     private func recordChartSample(status: ReadingStatus) {
-        let stored = VitalReading(timestamp: .now, oxygenSaturation: vitals.oxygenSaturation, heartRate: vitals.heartRate, deviceSerial: vitals.serial, status: status)
+        let storedStatus: ReadingStatus = status == .movement ? .available : status
+        let stored = VitalReading(timestamp: .now, oxygenSaturation: vitals.oxygenSaturation, heartRate: vitals.heartRate, deviceSerial: vitals.serial, status: storedStatus, movement: vitals.movement)
         history.append(store.insert(stored) ?? stored)
         storageError = store.storageError
         let cutoff = Date.now.addingTimeInterval(-12 * 60 * 60)
@@ -363,10 +398,15 @@ final class MonitorViewModel {
 
     private func quality(of reading: LiveVitals, at now: Date, instant: ContinuousClock.Instant) -> ReadingStatus {
         let payloadAge = lastPayloadAdvancedInstant.map { elapsed(from: $0, to: instant) }
+        let movementAffected = MovementReliability.isAffected(
+            at: now,
+            currentMovement: reading.movement,
+            readings: history,
+            threshold: movementThreshold)
         return TelemetryValidation.status(
             oxygen: reading.oxygenSaturation,
             heartRate: reading.heartRate,
-            movement: reading.movement,
+            movementDetected: movementAffected,
             sourceTimestamp: reading.timestamp,
             lastPayloadAge: payloadAge,
             now: now,
@@ -383,8 +423,13 @@ final class MonitorViewModel {
         let hasCritical = latched.contains { alarm in
             if case .critical = alarm.severity { return true }
             return false
-        } || readingStatus != .movement
+        } || audibleConnectionLossAlarm
         if hasCritical, !alarmIsSilenced { audio.start() } else { audio.stop() }
+    }
+
+    private func markDataUnreliable() {
+        finishAllViolations(at: lastReceivedAt ?? .now, instant: lastReceivedInstant ?? clock.now)
+        audio.stop()
     }
 
     private func finishAllViolations(at endedAt: Date, instant: ContinuousClock.Instant) {

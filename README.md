@@ -1,6 +1,10 @@
 # VitalsLoom for macOS
 
-A native SwiftUI personal SpO₂ and pulse display with charts, historical analysis, configurable alarms, and local SQLite storage. It can display values supplied by compatible user-owned sock hardware: pulse, SpO₂, battery, signal strength, and movement state.
+VitalsLoom is an independent, unofficial macOS app designed to work with user-owned **Owlet Dream Sock** devices. It displays pulse, SpO₂, battery, signal strength, and movement data with charts, historical analysis, configurable alarms, and local SQLite storage.
+
+VitalsLoom is not affiliated with, sponsored by, or endorsed by Owlet Baby Care, Inc. Its unofficial compatibility may change or stop working.
+
+![VitalsLoom live monitoring dashboard](docs/images/vitalsloom-live-dashboard.png)
 
 ## Run
 
@@ -44,7 +48,7 @@ The app starts with simulated data. Open **Main Setup**, disable demo mode, sele
 
 API polling and display refresh are jointly configurable down to one second. Every successful poll updates the gauges and appends the chart sample in the same main-thread operation with one local timestamp. **Test minimum changed-value interval** performs a 30-second probe and reports the shortest interval between genuinely changed SpO₂ or pulse values returned by the selected data source.
 
-The native client reads Owlet's movement signal (`mv` on v3 and `MOVEMENT` on v2). Charts shade movement, stale, and unavailable intervals with distinct background colors; those samples are excluded from alarm evaluation and trend aggregation, and chart lines are broken across those gaps. The live Trends panel can switch independently between autoscaled SpO₂ and pulse views.
+The native client stores the raw movement value with each sample. A configurable movement threshold (50 by default) is applied only when displaying or analyzing data, so changing it immediately reclassifies existing history without rewriting the database. A value above the threshold marks a movement-affected interval from 15 seconds before through 30 seconds after the spike; overlapping intervals merge. Values remain visible on live charts with a yellow unreliable-data background, but affected intervals are excluded consistently from History aggregates, alarm evaluation, and Analysis calculations and trends. Stale and unavailable samples remain excluded and break chart lines. The audible connection-loss alarm can be disabled independently in Settings while preserving its visual warning. The live Trends panel can switch independently between autoscaled SpO₂ and pulse views.
 
 Alarm rules can be added independently with metric, above/below threshold, sustained duration, and action. **Log only** writes a violation to SQLite; **Log + loud alert** also repeats an in-app alarm sound. The app prevents idle sleep while monitoring and Focus/DND does not suppress in-app audio, but no ordinary macOS app can produce sound while the Mac is manually asleep or override muted hardware/system output.
 
