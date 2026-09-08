@@ -4,6 +4,7 @@ import Foundation
 enum OwletAPIError: LocalizedError {
     case invalidCredentials
     case noDevices
+    case noLiveReading
     case missingServiceConfiguration
     case invalidServiceConfiguration
     case invalidResponse(String)
@@ -13,6 +14,7 @@ enum OwletAPIError: LocalizedError {
         switch self {
         case .invalidCredentials: "Invalid device-account email or password."
         case .noDevices: "No supported socks were found."
+        case .noLiveReading: "The sock is not currently reporting a usable reading."
         case .missingServiceConfiguration: "Unofficial service configuration is missing. See the repository README."
         case .invalidServiceConfiguration: "Unofficial service configuration is invalid or has unsafe file permissions."
         case .invalidResponse(let detail): "The device service returned an unexpected response: \(detail)"
@@ -112,6 +114,9 @@ actor OwletAPI {
         if let value = properties["REAL_TIME_VITALS"]?["value"] as? String,
            let data = value.data(using: .utf8),
            let realtime = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if numericValue(realtime["ox"]) == 0 || numericValue(realtime["hr"]) == 0 {
+                throw OwletAPIError.noLiveReading
+            }
             let oxygen = try requiredNumber(realtime["ox"], named: "oxygen", allowed: 1...100)
             let heartRate = try requiredNumber(realtime["hr"], named: "heart rate", allowed: 20...350)
             return LiveVitals(
@@ -126,6 +131,9 @@ actor OwletAPI {
                 movement: safeInteger(realtime["mv"], allowed: 0...1_000))
         }
 
+        if numericValue(properties["OXYGEN_LEVEL"]?["value"]) == 0 || numericValue(properties["HEART_RATE"]?["value"]) == 0 {
+            throw OwletAPIError.noLiveReading
+        }
         let oxygen = try requiredPropertyNumber("OXYGEN_LEVEL", in: properties, named: "oxygen", allowed: 1...100)
         let heartRate = try requiredPropertyNumber("HEART_RATE", in: properties, named: "heart rate", allowed: 20...350)
         let oxygenTimestamp = parseDate(properties["OXYGEN_LEVEL"]?["data_updated_at"])
@@ -168,6 +176,7 @@ actor OwletAPI {
         var signIn = URLRequest(url: try validatedURL(info.signIn, expectedHost: expectedHosts.signIn))
         signIn.httpMethod = "POST"
         signIn.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        signIn.setValue("application/json", forHTTPHeaderField: "Accept")
         signIn.httpBody = try JSONSerialization.data(withJSONObject: ["app_id": info.appID, "app_secret": info.appSecret, "provider": "owl_id", "token": miniToken])
         let signedIn = try await send(signIn)
         guard let token = signedIn["access_token"] as? String, !token.isEmpty else { throw OwletAPIError.invalidResponse("access token") }
@@ -303,6 +312,12 @@ actor OwletAPI {
             throw OwletAPIError.invalidResponse("invalid \(name)")
         }
         return number
+    }
+
+    private func numericValue(_ value: Any?) -> Double? {
+        guard let number = value as? NSNumber else { return nil }
+        let value = number.doubleValue
+        return value.isFinite ? value : nil
     }
 
     private func optionalNumber(_ value: Any?, allowed: ClosedRange<Double>) -> Double? {

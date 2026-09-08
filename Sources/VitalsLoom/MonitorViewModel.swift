@@ -268,6 +268,14 @@ final class MonitorViewModel {
             lastError = nil
             consecutivePollFailures = 0
         } catch {
+            if case .noLiveReading? = error as? OwletAPIError {
+                if let device { state = .connected(device.name) }
+                lastError = error.localizedDescription
+                consecutivePollFailures = 0
+                readingStatus = .unavailable
+                markNoActiveReading()
+                return
+            }
             let message = error.localizedDescription
             state = .failed(message)
             lastError = message
@@ -425,6 +433,15 @@ final class MonitorViewModel {
             return false
         } || audibleConnectionLossAlarm
         if hasCritical, !alarmIsSilenced { audio.start() } else { audio.stop() }
+    }
+
+    private func markNoActiveReading() {
+        let endedAt = lastReceivedAt ?? .now
+        let endedInstant = lastReceivedInstant ?? clock.now
+        let latched = alarms.filter { $0.id != "data-unavailable" }
+        finishAllViolations(at: endedAt, instant: endedInstant)
+        alarms = latched + [ActiveAlarm(id: "data-unavailable", message: "NO ACTIVE SOCK READING", severity: .warning)]
+        audio.stop()
     }
 
     private func markDataUnreliable() {
